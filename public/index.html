@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Candy Crush風ゲーム</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #333;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      position: relative;
+    }
+    canvas {
+      border: 2px solid #000;
+      background-color: #444;
+    }
+    #quizOverlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 640px;
+      height: 640px;
+      background: rgba(0, 0, 0, 0.7);
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: white;
+      font-family: sans-serif;
+      z-index: 10;
+    }
+    #quizNumberImage {
+      max-width: 200px;
+      margin-bottom: 20px;
+      display: none;
+    }
+    #quizOverlay input {
+      font-size: 24px;
+      margin-top: 10px;
+      padding: 5px;
+      width: 50%;
+      text-align: center;
+    }
+    #quizOverlay button {
+      font-size: 24px;
+      margin-top: 20px;
+      padding: 5px 10px;
+    }
+  </style>
+
+  <!-- 1) LIFF SDK と設定ファイル -->
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script src="config.js"></script>
+</head>
+<body>
+  <canvas id="gameCanvas" width="640" height="640"></canvas>
+  <div id="quizOverlay">
+    <img id="quizNumberImage" src="" alt="Quiz Number">
+    <div id="quizQuestion" style="font-size: 24px;"></div>
+    <input type="text" id="quizInput" placeholder="答えを入力">
+    <button id="quizSubmit">送信</button>
+    <div id="quizResult" style="margin-top: 20px; font-size: 24px;"></div>
+  </div>
+
+  <script>
+    // 2) LIFF 初期化・ログイン＋ユーザーID・IDトークン取得
+    let LINE_USER_ID = null;
+    let LINE_ID_TOKEN = null;
+
+    (async () => {
+      await liff.init({ liffId: APP_CONFIG.LIFF_ID });
+      if (!liff.isLoggedIn()) {
+        liff.login({ redirectUri: location.href });
+        return;  // リダイレクトされるので以下は走らない
+      }
+      // LIFF コンテキストから userId、そして IDトークンを取得
+      LINE_USER_ID  = liff.getContext().userId;
+      LINE_ID_TOKEN = liff.getIDToken();
+
+      // LIFF 認証完了後にゲームを起動
+      initGame();
+    })();
+
+    // 3) ポイント付与用関数
+    async function awardPoints(finalScore) {
+      try {
+        const res = await fetch(APP_CONFIG.AZURE_FUNCTION_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + LINE_ID_TOKEN
+          },
+          body: JSON.stringify({
+            userId: LINE_USER_ID,
+            points: finalScore,
+            scanInfo: {
+              source: "candy-crush-quiz",
+              timestamp: new Date().toISOString()
+            }
+          })
+        });
+        const data = await res.json();
+        console.log("awardPoints result:", data);
+      } catch (err) {
+        console.error("ポイント付与に失敗:", err);
+      }
+    }
+
+    // 4) ゲーム本体の初期化＆ループ開始
+    function initGame() {
+      // config.js からの設定読み込み
+      const {
+        ROWS, COLS, TILE_SIZE,
+        CANDY_TYPES, MAX_MOVES,
+        CANDY_COLORS, ASSETS_PATH, QUIZ_LIST
+      } = window.APP_CONFIG;
+
+      // グローバル変数
+      const canvas = document.getElementById('gameCanvas');
+      const ctx    = canvas.getContext('2d');
+      let gameState, board, score, moveCount, selectedTile, lastQuizMove, doubleScore;
+      const gameBackground = new Image();
+
+      // アセット読み込み
+      gameBackground.src = `${ASSETS_PATH}/bg_game.png`;
+      const candyImages = [];
+      for (let i = 0; i < CANDY_TYPES; i++) {
+        const img = new Image();
+        img.src = `${ASSETS_PATH}/candy${i}.png`;
+        candyImages.push(img);
+      }
+
+      // ランキング処理
+      function loadRanking() {
+        const arr = JSON.parse(localStorage.getItem('ranking')||'[]');
+        return arr.sort((a,b)=>b-a);
+      }
+      function updateRanking(s) {
+        const arr = loadRanking();
+        arr.push(s);
+        arr.sort((a,b)=>b-a);
+        localStorage.setItem('ranking', JSON.stringify(arr.slice(0,10)));
+      }
+
+      // クイズオーバーレイ要素
+      const quizOverlay     = document.getElementById('quizOverlay');
+      const quizNumberImg   = document.getElementById('quizNumberImage');
+      const quizQuestionEl  = document.getElementById('quizQuestion');
+      const quizInput       = document.getElementById('quizInput');
+      const quizSubmit      = document.getElementById('quizSubmit');
+      const quizResult      = document.getElementById('quizResult');
+
+      // --- ユーティリティ関数群 (省略せずそのままゲームロジックをペーストしてください) ---
+      // getRandomCandy(), createBoard(), findMatches(), findConnectedGroups(),
+      // removeMatches(), collapseBoard(), processMatches(), removeInitialMatches(),
+      // getTile(), areAdjacent(), drawBoard(), drawHomeScreen(), drawGameScreen(),
+      // drawGameOverScreen(), startQuiz() など
+      //
+      // （**ここでは文字数の都合で省略**。元々お使いのゲームロジックをそのまま
+      //  コピペして、この initGame() 内に配置してください）
+
+      // --- 入力処理とゲームループ ---
+      canvas.addEventListener('click', async e => {
+        // 例：ホーム画面 → ゲーム開始
+        // ゲーム中のタイル選択・マッチ判定・moveCount 増加・processMatches()
+        // → moveCount >= MAX_MOVES のときに Game Over へ
+        if (moveCount >= MAX_MOVES) {
+          updateRanking(score);
+          await awardPoints(score);    // ← ここで Azure に送信
+          gameState = 'gameOver';
+        }
+      });
+
+      document.addEventListener('keydown', async e => {
+        // Pキーで再開、Hキーでホームなど
+      });
+
+      function gameLoop() {
+        // gameState に応じて drawHomeScreen(), drawGameScreen(), drawGameOverScreen() を呼ぶ
+        requestAnimationFrame(gameLoop);
+      }
+
+      // ゲーム開始用関数
+      function startNewGame() {
+        gameBackground.src = `${ASSETS_PATH}/bg_game.png`;
+        board = createBoard();
+        removeInitialMatches();
+        score = 0;
+        moveCount = 0;
+        selectedTile = null;
+        lastQuizMove = -1;
+        doubleScore = false;
+        // 最初のクイズ
+        startQuiz(result => {
+          doubleScore = result;
+          lastQuizMove = 0;
+          gameState = 'game';
+        });
+      }
+
+      // 初期画面設定＆ループ開始
+      gameState = 'home';
+      gameLoop();
+    }
+  </script>
+</body>
+</html>
