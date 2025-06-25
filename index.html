@@ -34,14 +34,13 @@
   </div>
 
   <script>
-    // ──────────────────────────────────────────────────────────
     // 1) LIFF 初期化・ログイン
-    // ──────────────────────────────────────────────────────────
     let LINE_USER_ID, LINE_ID_TOKEN;
     (async () => {
       await liff.init({ liffId: APP_CONFIG.LIFF_ID });
       if (!liff.isLoggedIn()) {
-        liff.login({ redirectUri: APP_CONFIG.LIFF_URL });
+        // location.href をそのまま redirectUri に使う
+        liff.login({ redirectUri: location.href });
         return;
       }
       LINE_USER_ID  = liff.getContext().userId;
@@ -49,16 +48,14 @@
       initGame();
     })();
 
-    // ──────────────────────────────────────────────────────────
-    // 2) ポイント付与用関数
-    // ──────────────────────────────────────────────────────────
+    // 2) ポイント付与関数
     async function awardPoints(points) {
       try {
         const res = await fetch(APP_CONFIG.AZURE_FUNCTION_URL, {
           method: "POST",
           headers: {
             "Content-Type":"application/json",
-            "Authorization":"Bearer "+LINE_ID_TOKEN
+            "Authorization":"Bearer " + LINE_ID_TOKEN
           },
           body: JSON.stringify({
             userId: LINE_USER_ID,
@@ -72,138 +69,110 @@
       }
     }
 
-    // ──────────────────────────────────────────────────────────
-    // 3) グローバル変数
-    // ──────────────────────────────────────────────────────────
-    let canvas, ctx;
-    let board, score, moveCount, selectedTile, lastQuizMove, doubleScore, gameState;
-    let gameBackground;
-    const {
-      ROWS, COLS, TILE_SIZE,
-      CANDY_TYPES, MAX_MOVES,
-      CANDY_COLORS, ASSETS_PATH, QUIZ_LIST
-    } = APP_CONFIG;
+    // 3) 設定読み込み
+    const { ROWS, COLS, TILE_SIZE, CANDY_TYPES, MAX_MOVES, CANDY_COLORS, ASSETS_PATH, QUIZ_LIST } = APP_CONFIG;
 
-    // ──────────────────────────────────────────────────────────
-    // 4) ユーティリティ関数
-    // ──────────────────────────────────────────────────────────
+    // 4) グローバル変数
+    let canvas, ctx, board, score, moveCount, selectedTile, lastQuizMove, doubleScore, gameState;
+    let gameBackground, candyImages = [];
+
+    // 5) ユーティリティ関数（完全版）
     function getRandomCandy() {
       return Math.floor(Math.random() * CANDY_TYPES);
     }
-
     function createBoard() {
       return Array.from({ length: ROWS }, () =>
         Array.from({ length: COLS }, getRandomCandy)
       );
     }
-
     function findMatches() {
-      const matches = new Set();
+      const m = new Set();
       // 横方向
-      for (let i = 0; i < ROWS; i++) {
-        let count = 1;
-        for (let j = 1; j < COLS; j++) {
-          if (board[i][j] === board[i][j-1]) count++;
+      for (let i=0; i<ROWS; i++) {
+        let cnt = 1;
+        for (let j=1; j<COLS; j++) {
+          if (board[i][j] === board[i][j-1]) cnt++;
           else {
-            if (count >= 3) for (let k = j-count; k < j; k++) matches.add(`${i},${k}`);
-            count = 1;
+            if (cnt >= 3) for (let k=j-cnt; k<j; k++) m.add(`${i},${k}`);
+            cnt = 1;
           }
         }
-        if (count >= 3) for (let k = COLS-count; k < COLS; k++) matches.add(`${i},${k}`);
+        if (cnt >= 3) for (let k=COLS-cnt; k<COLS; k++) m.add(`${i},${k}`);
       }
       // 縦方向
-      for (let j = 0; j < COLS; j++) {
-        let count = 1;
-        for (let i = 1; i < ROWS; i++) {
-          if (board[i][j] === board[i-1][j]) count++;
+      for (let j=0; j<COLS; j++) {
+        let cnt = 1;
+        for (let i=1; i<ROWS; i++) {
+          if (board[i][j] === board[i-1][j]) cnt++;
           else {
-            if (count >= 3) for (let k = i-count; k < i; k++) matches.add(`${k},${j}`);
-            count = 1;
+            if (cnt >= 3) for (let k=i-cnt; k<i; k++) m.add(`${k},${j}`);
+            cnt = 1;
           }
         }
-        if (count >= 3) for (let k = ROWS-count; k < ROWS; k++) matches.add(`${k},${j}`);
+        if (cnt >= 3) for (let k=ROWS-cnt; k<ROWS; k++) m.add(`${k},${j}`);
       }
-      return matches;
+      return m;
     }
-
     function findConnectedGroups(set) {
-      const groups = [], visited = new Set();
-      function dfs(key, group) {
-        const [r, c] = key.split(",").map(Number);
+      const groups = [], vis = new Set();
+      function dfs(key,grp) {
+        const [r,c] = key.split(",").map(Number);
         [[r-1,c],[r+1,c],[r,c-1],[r,c+1]].forEach(([nr,nc])=>{
           const nk = `${nr},${nc}`;
-          if (set.has(nk) && !visited.has(nk)) {
-            visited.add(nk);
-            group.add(nk);
-            dfs(nk, group);
+          if (set.has(nk) && !vis.has(nk)) {
+            vis.add(nk); grp.add(nk); dfs(nk,grp);
           }
         });
       }
-      for (const key of set) {
-        if (!visited.has(key)) {
-          const group = new Set([key]);
-          visited.add(key);
-          dfs(key, group);
-          groups.push(group);
+      set.forEach(key => {
+        if (!vis.has(key)) {
+          const grp = new Set([key]);
+          vis.add(key);
+          dfs(key,grp);
+          groups.push(grp);
         }
-      }
+      });
       return groups;
     }
-
     function removeMatches(set) {
       set.forEach(k => {
-        const [r, c] = k.split(",").map(Number);
+        const [r,c] = k.split(",").map(Number);
         board[r][c] = null;
       });
     }
-
     function collapseBoard() {
-      for (let j = 0; j < COLS; j++) {
-        const col = board.map(row => row[j]).filter(v => v !== null);
+      for (let j=0; j<COLS; j++) {
+        const col = board.map(r=>r[j]).filter(v=>v!==null);
         const miss = ROWS - col.length;
-        const newCandies = Array.from({ length: miss }, getRandomCandy);
-        const merged = newCandies.concat(col);
-        for (let i = 0; i < ROWS; i++) board[i][j] = merged[i];
+        const newC = Array.from({length:miss},getRandomCandy).concat(col);
+        for (let i=0; i<ROWS; i++) board[i][j] = newC[i];
       }
     }
-
     function processMatches() {
-      let total = 0;
-      let m = findMatches();
+      let total = 0, m = findMatches();
       while (m.size) {
-        findConnectedGroups(m).forEach(g => total += (g.size - 2) * 30);
-        removeMatches(m);
-        collapseBoard();
-        m = findMatches();
+        findConnectedGroups(m).forEach(g=> total += (g.size-2)*30 );
+        removeMatches(m); collapseBoard(); m = findMatches();
       }
       if (doubleScore) { total *= 2; doubleScore = false; }
       score += total;
     }
-
     function removeInitialMatches() {
       let m = findMatches();
       while (m.size) {
-        removeMatches(m);
-        collapseBoard();
-        m = findMatches();
+        removeMatches(m); collapseBoard(); m = findMatches();
       }
     }
-
     function loadRanking() {
-      const arr = JSON.parse(localStorage.getItem("ranking") || "[]");
+      const arr = JSON.parse(localStorage.getItem("ranking")||"[]");
       return arr.sort((a,b)=>b-a);
     }
-
     function updateRanking(s) {
-      const arr = loadRanking();
-      arr.push(s);
-      arr.sort((a,b)=>b-a);
+      const arr = loadRanking(); arr.push(s); arr.sort((a,b)=>b-a);
       localStorage.setItem("ranking", JSON.stringify(arr.slice(0,10)));
     }
 
-    // ──────────────────────────────────────────────────────────
-    // 5) クイズ機能
-    // ──────────────────────────────────────────────────────────
+    // 6) クイズ機能
     const quizOverlay     = document.getElementById("quizOverlay");
     const quizNumImage    = document.getElementById("quizNumberImage");
     const quizQuestionEl  = document.getElementById("quizQuestion");
@@ -211,207 +180,165 @@
     const quizSubmit      = document.getElementById("quizSubmit");
     const quizResult      = document.getElementById("quizResult");
 
-    function startQuiz(callback) {
+    function startQuiz(cb) {
       gameState = "quiz";
       const q = QUIZ_LIST[Math.floor(Math.random()*QUIZ_LIST.length)];
       const m = q.question.match(/クイズ(\d+):/);
       if (m) {
         quizNumImage.src = `${ASSETS_PATH}/quiz${m[1]}.png`;
         quizNumImage.style.display = "block";
-        gameBackground.src = quizNumImage.src;
+        gameBackground.src = `${ASSETS_PATH}/images.png`;
       } else {
         quizNumImage.style.display = "none";
       }
       quizQuestionEl.textContent = q.question;
-      quizInput.value = "";
-      quizResult.textContent = "";
+      quizInput.value = ""; quizResult.textContent = "";
       quizOverlay.style.display = "flex";
 
-      function submit() {
+      function onSubmit() {
         const ans = quizInput.value.trim();
-        quizResult.textContent = (ans === q.answer ? "正解！" : "不正解！");
-        quizSubmit.removeEventListener("click", submit);
-        quizInput.removeEventListener("keydown", onKey);
+        quizResult.textContent = (ans===q.answer ? "正解！" : "不正解！");
+        quizSubmit.removeEventListener("click",onSubmit);
+        quizInput.removeEventListener("keydown",onKey);
         setTimeout(()=>{
           quizOverlay.style.display = "none";
           gameState = "game";
-          callback(ans === q.answer);
+          cb(ans===q.answer);
         }, 1500);
       }
-      function onKey(e) { if (e.key === "Enter") submit(); }
-
-      quizSubmit.addEventListener("click", submit);
-      quizInput.addEventListener("keydown", onKey);
+      function onKey(e){ if(e.key==="Enter") onSubmit(); }
+      quizSubmit.addEventListener("click",onSubmit);
+      quizInput.addEventListener("keydown",onKey);
     }
 
-    // ──────────────────────────────────────────────────────────
-    // 6) 描画関数
-    // ──────────────────────────────────────────────────────────
-    function drawBoard() {
-      for (let i = 0; i < ROWS; i++) {
-        for (let j = 0; j < COLS; j++) {
-          const v = board[i][j], x = j*TILE_SIZE, y = i*TILE_SIZE;
-          if (v !== null && candyImages[v].complete) {
-            ctx.drawImage(candyImages[v], x, y, TILE_SIZE, TILE_SIZE);
+    // 7) 描画関数
+    function drawBoard(){
+      for(let i=0;i<ROWS;i++){
+        for(let j=0;j<COLS;j++){
+          const v=board[i][j], x=j*TILE_SIZE, y=i*TILE_SIZE;
+          if(v!==null&&candyImages[v].complete){
+            ctx.drawImage(candyImages[v],x,y,TILE_SIZE,TILE_SIZE);
           } else {
-            ctx.fillStyle = CANDY_COLORS[v] || "white";
-            ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+            ctx.fillStyle=CANDY_COLORS[v]||"white";
+            ctx.fillRect(x,y,TILE_SIZE,TILE_SIZE);
           }
-          ctx.strokeStyle = "black";
-          ctx.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
+          ctx.strokeStyle="black";
+          ctx.strokeRect(x,y,TILE_SIZE,TILE_SIZE);
         }
       }
-      if (selectedTile) {
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = "white";
+      if(selectedTile){
+        ctx.lineWidth=3; ctx.strokeStyle="white";
         ctx.strokeRect(
-          selectedTile.col * TILE_SIZE,
-          selectedTile.row * TILE_SIZE,
+          selectedTile.col*TILE_SIZE,
+          selectedTile.row*TILE_SIZE,
           TILE_SIZE, TILE_SIZE
         );
-        ctx.lineWidth = 1;
+        ctx.lineWidth=1;
       }
     }
-
-    function drawHomeScreen() {
-      ctx.fillStyle = "#303030"; ctx.fillRect(0,0,COLS*TILE_SIZE,ROWS*TILE_SIZE);
-      ctx.fillStyle = "white"; ctx.font = "32px sans-serif";
-      let t = "Candy Crush風ゲーム"; ctx.fillText(t,(COLS*TILE_SIZE-ctx.measureText(t).width)/2,50);
-      ctx.font = "24px sans-serif"; t = "ランキング"; ctx.fillText(t,(COLS*TILE_SIZE-ctx.measureText(t).width)/2,150);
-      let y = 200;
-      loadRanking().forEach((s,i)=>{
-        const line = `${i+1}. ${s}`;
-        ctx.fillText(line, (COLS*TILE_SIZE-ctx.measureText(line).width)/2, y);
-        y += 30;
-      });
-      if (loadRanking().length === 0) {
-        const line = "まだスコアはありません";
-        ctx.fillText(line, (COLS*TILE_SIZE-ctx.measureText(line).width)/2, y);
+    function drawHomeScreen(){
+      ctx.fillStyle="#303030"; ctx.fillRect(0,0,COLS*TILE_SIZE,ROWS*TILE_SIZE);
+      ctx.fillStyle="white"; ctx.font="32px sans-serif";
+      let t="Candy Crush風ゲーム"; ctx.fillText(t,(COLS*TILE_SIZE-ctx.measureText(t).width)/2,50);
+      ctx.font="24px sans-serif"; t="ランキング"; ctx.fillText(t,(COLS*TILE_SIZE-ctx.measureText(t).width)/2,150);
+      let y=200;
+      const ranks=loadRanking();
+      if(ranks.length){
+        ranks.forEach((s,i)=>{
+          const line=`${i+1}. ${s}`;
+          ctx.fillText(line,(COLS*TILE_SIZE-ctx.measureText(line).width)/2,y);
+          y+=30;
+        });
+      } else {
+        const line="まだスコアはありません";
+        ctx.fillText(line,(COLS*TILE_SIZE-ctx.measureText(line).width)/2,y);
       }
-      const instr = "Pキー または クリックで開始";
-      ctx.fillText(instr, (COLS*TILE_SIZE-ctx.measureText(instr).width)/2, ROWS*TILE_SIZE-50);
+      const instr="Pキー または クリックで開始";
+      ctx.fillText(instr,(COLS*TILE_SIZE-ctx.measureText(instr).width)/2,ROWS*TILE_SIZE-50);
     }
-
-    function drawGameScreen() {
-      if (gameBackground.complete) {
+    function drawGameScreen(){
+      if(gameBackground.complete){
         ctx.drawImage(gameBackground,0,0,COLS*TILE_SIZE,ROWS*TILE_SIZE);
       } else {
-        ctx.fillStyle = "#505050";
-        ctx.fillRect(0,0,COLS*TILE_SIZE,ROWS*TILE_SIZE);
+        ctx.fillStyle="#505050"; ctx.fillRect(0,0,COLS*TILE_SIZE,ROWS*TILE_SIZE);
       }
       drawBoard();
-      ctx.fillStyle = "white"; ctx.font = "20px sans-serif";
+      ctx.fillStyle="white"; ctx.font="20px sans-serif";
       ctx.fillText(`Score: ${score}`,10,25);
       ctx.fillText(`Moves: ${moveCount} / ${MAX_MOVES}`,10,50);
     }
-
-    function drawGameOverScreen() {
-      ctx.fillStyle = "#505050"; ctx.fillRect(0,0,COLS*TILE_SIZE,ROWS*TILE_SIZE);
-      ctx.fillStyle = "white"; ctx.font = "36px sans-serif";
-      let go = "Game Over";
-      ctx.fillText(go, (COLS*TILE_SIZE-ctx.measureText(go).width)/2, ROWS*TILE_SIZE/2-80);
-      let fs = `Final Score: ${score}`;
-      ctx.fillText(fs, (COLS*TILE_SIZE-ctx.measureText(fs).width)/2, ROWS*TILE_SIZE/2-40);
-      ctx.font = "24px sans-serif";
-      let instr = "Hキー：ホーム　　Pキー：もう一度";
-      ctx.fillText(instr, (COLS*TILE_SIZE-ctx.measureText(instr).width)/2, ROWS*TILE_SIZE/2);
+    function drawGameOverScreen(){
+      ctx.fillStyle="#505050"; ctx.fillRect(0,0,COLS*TILE_SIZE,ROWS*TILE_SIZE);
+      ctx.fillStyle="white"; ctx.font="36px sans-serif";
+      let go="Game Over";
+      ctx.fillText(go,(COLS*TILE_SIZE-ctx.measureText(go).width)/2,ROWS*TILE_SIZE/2-80);
+      let fs=`Final Score: ${score}`;
+      ctx.fillText(fs,(COLS*TILE_SIZE-ctx.measureText(fs).width)/2,ROWS*TILE_SIZE/2-40);
+      ctx.font="24px sans-serif";
+      const instr="Hキー：ホーム　　Pキー：もう一度";
+      ctx.fillText(instr,(COLS*TILE_SIZE-ctx.measureText(instr).width)/2,ROWS*TILE_SIZE/2);
     }
 
-    // ──────────────────────────────────────────────────────────
-    // 7) 入力 & ゲームループ
-    // ──────────────────────────────────────────────────────────
-    let candyImages = [];
-    function onCanvasClick(e) {
-      if (gameState === "home") {
-        startNewGame();
-      } else if (gameState === "game") {
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left, y = e.clientY - rect.top;
-        const tile = { row: Math.floor(y/TILE_SIZE), col: Math.floor(x/TILE_SIZE) };
-        if (!selectedTile) {
-          selectedTile = tile;
-        } else if (
-          Math.abs(selectedTile.row-tile.row)+Math.abs(selectedTile.col-tile.col)===1
-        ) {
-          const [r1,c1] = [selectedTile.row,selectedTile.col];
-          const [r2,c2] = [tile.row,tile.col];
-          [board[r1][c1],board[r2][c2]] = [board[r2][c2],board[r1][c1]];
-          if (findMatches().size>0) {
-            moveCount++;
-            processMatches();
-            if ([0,5,10,15].includes(moveCount)&&moveCount!==lastQuizMove) {
-              lastQuizMove = moveCount;
-              startQuiz(res => doubleScore = res);
+    // 8) 入力 & ループ
+    function onCanvasClick(e){
+      if(gameState==="home"){ startNewGame(); }
+      else if(gameState==="game"){
+        const rect=canvas.getBoundingClientRect(), x=e.clientX-rect.left, y=e.clientY-rect.top;
+        const tile={ row:Math.floor(y/TILE_SIZE), col:Math.floor(x/TILE_SIZE) };
+        if(!selectedTile) selectedTile=tile;
+        else if(Math.abs(selectedTile.row-tile.row)+Math.abs(selectedTile.col-tile.col)===1){
+          const [r1,c1]=[selectedTile.row,selectedTile.col], [r2,c2]=[tile.row,tile.col];
+          [board[r1][c1],board[r2][c2]]=[board[r2][c2],board[r1][c1]];
+          if(findMatches().size>0){
+            moveCount++; processMatches();
+            if([0,5,10,15].includes(moveCount)&&moveCount!==lastQuizMove){
+              lastQuizMove=moveCount; startQuiz(res=>doubleScore=res);
             }
           } else {
-            [board[r1][c1],board[r2][c2]] = [board[r2][c2],board[r1][c1]];
+            [board[r1][c1],board[r2][c2]]=[board[r2][c2],board[r1][c1]];
           }
-          selectedTile = null;
-          if (moveCount >= MAX_MOVES) {
-            updateRanking(score);
-            awardPoints(score);
-            gameState = "gameOver";
+          selectedTile=null;
+          if(moveCount>=MAX_MOVES){
+            updateRanking(score); awardPoints(score); gameState="gameOver";
           }
         }
       }
     }
-
-    function onKeyDown(e) {
-      if (gameState==="home" && e.key.toLowerCase()==="p") {
-        startNewGame();
-      } else if (gameState==="gameOver") {
-        if (e.key.toLowerCase()==="h") gameState="home";
-        if (e.key.toLowerCase()==="p") startNewGame();
+    function onKeyDown(e){
+      if(gameState==="home"&&e.key.toLowerCase()==="p") startNewGame();
+      else if(gameState==="gameOver"){
+        if(e.key.toLowerCase()==="h") gameState="home";
+        if(e.key.toLowerCase()==="p") startNewGame();
       }
     }
-
-    function startNewGame() {
-      board         = createBoard();
-      removeInitialMatches();
-      score         = 0;
-      moveCount     = 0;
-      selectedTile  = null;
-      lastQuizMove  = -1;
-      doubleScore   = false;
-      gameState     = "quiz";
-      startQuiz(res => {
-        doubleScore  = res;
-        lastQuizMove = 0;
-        gameState    = "game";
-      });
+    function startNewGame(){
+      board=createBoard(); removeInitialMatches(); score=0; moveCount=0;
+      selectedTile=null; lastQuizMove=-1; doubleScore=false; gameState="quiz";
+      startQuiz(res=>{ doubleScore=res; lastQuizMove=0; gameState="game"; });
     }
-
-    function gameLoop() {
-      if (gameState==="home")          drawHomeScreen();
-      else if (gameState==="game"||gameState==="quiz") drawGameScreen();
-      else if (gameState==="gameOver") drawGameOverScreen();
+    function gameLoop(){
+      if(gameState==="home") drawHomeScreen();
+      else if(gameState==="game"||gameState==="quiz") drawGameScreen();
+      else if(gameState==="gameOver") drawGameOverScreen();
       requestAnimationFrame(gameLoop);
     }
 
-    // ──────────────────────────────────────────────────────────
-    // 8) initGame 本体：セットアップしてループ開始
-    // ──────────────────────────────────────────────────────────
-    function initGame() {
+    // 9) initGame
+    function initGame(){
       canvas = document.getElementById("gameCanvas");
       ctx    = canvas.getContext("2d");
-      board  = createBoard();
-      removeInitialMatches();
-      score         = 0;
-      moveCount     = 0;
-      selectedTile  = null;
-      lastQuizMove  = -1;
-      doubleScore   = false;
-      gameState     = "home";
+      board  = createBoard(); removeInitialMatches();
+      score=0; moveCount=0; selectedTile=null; lastQuizMove=-1; doubleScore=false; gameState="home";
 
-      // 背景画像を candy0.png
+      // 背景を images.png に
       gameBackground = new Image();
-      gameBackground.src = `${ASSETS_PATH}/candy0.png`;
+      gameBackground.src = `${ASSETS_PATH}/images.png`;
 
-      // キャンディ画像をロード
-      candyImages = [];
-      for (let i=0; i<CANDY_TYPES; i++){
-        const img = new Image();
-        img.src = `${ASSETS_PATH}/candy${i}.png`;
+      // キャンディ画像読み込み
+      candyImages=[];
+      for(let i=0;i<CANDY_TYPES;i++){
+        const img=new Image();
+        img.src=`${ASSETS_PATH}/candy${i}.png`;
         candyImages.push(img);
       }
 
