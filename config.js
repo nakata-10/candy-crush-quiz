@@ -27,14 +27,11 @@ window.APP_CONFIG = {
   // --- アセット配置パス ---
   ASSETS_PATH: 'assets',
 
-  // --- Azure Function（ポイント付与）URL ---
-  AZURE_FUNCTION_URL: "https://line-func-app.azurewebsites.net/awardPoints",
-
   // --- クイズ問題リスト ---
   QUIZ_LIST: [
-    { question: "クイズ1: この問題の答えは？", answer: "ans" },
-    { question: "クイズ2: 次の答えは？",       answer: "ans" },
-    { question: "クイズ3: 正しい答えは何？",   answer: "ans" },
-    { question: "クイズ4: 答えは何でしょう？", answer: "ans" }
+    { question: "クイズ1: 「ポイ活で〇〇を知ろう」この〇〇に入るのは？", answer: "大津" },
+    { question: "クイズ2: 毎日抽選で何人に当たる？",       answer: "10"||"10人" },
+    { question: "クイズ3: このキャラクターが頭の上にのせているのは何？",   answer: "葉っぱ"||"葉"||"はっぱ" },
+    { question: "クイズ4: 「〇〇〇で大津を知ろう」この〇〇〇に入るのは？", answer: "ポイ活" }
   ]
 };
