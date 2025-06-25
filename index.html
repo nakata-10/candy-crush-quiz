@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>Candy Crush風ゲーム</title>
+  <title>Candy Crush風ゲーム＋クイズ＋LINE連携</title>
   <style>
     body {
       margin: 0;
@@ -74,14 +74,11 @@
     (async () => {
       await liff.init({ liffId: APP_CONFIG.LIFF_ID });
       if (!liff.isLoggedIn()) {
-        liff.login({ redirectUri: location.href });
-        return;  // リダイレクトされるので以下は走らない
+        liff.login({ redirectUri: APP_CONFIG.LIFF_URL });
+        return;
       }
-      // LIFF コンテキストから userId、そして IDトークンを取得
       LINE_USER_ID  = liff.getContext().userId;
       LINE_ID_TOKEN = liff.getIDToken();
-
-      // LIFF 認証完了後にゲームを起動
       initGame();
     })();
 
@@ -112,14 +109,17 @@
 
     // 4) ゲーム本体の初期化＆ループ開始
     function initGame() {
-      // config.js からの設定読み込み
       const {
-        ROWS, COLS, TILE_SIZE,
-        CANDY_TYPES, MAX_MOVES,
-        CANDY_COLORS, ASSETS_PATH, QUIZ_LIST
+        ROWS,
+        COLS,
+        TILE_SIZE,
+        CANDY_TYPES,
+        MAX_MOVES,
+        CANDY_COLORS,
+        ASSETS_PATH,
+        QUIZ_LIST
       } = window.APP_CONFIG;
 
-      // グローバル変数
       const canvas = document.getElementById('gameCanvas');
       const ctx    = canvas.getContext('2d');
       let gameState, board, score, moveCount, selectedTile, lastQuizMove, doubleScore;
@@ -136,14 +136,14 @@
 
       // ランキング処理
       function loadRanking() {
-        const arr = JSON.parse(localStorage.getItem('ranking')||'[]');
-        return arr.sort((a,b)=>b-a);
+        const arr = JSON.parse(localStorage.getItem('ranking') || '[]');
+        return arr.sort((a, b) => b - a);
       }
       function updateRanking(s) {
         const arr = loadRanking();
         arr.push(s);
-        arr.sort((a,b)=>b-a);
-        localStorage.setItem('ranking', JSON.stringify(arr.slice(0,10)));
+        arr.sort((a, b) => b - a);
+        localStorage.setItem('ranking', JSON.stringify(arr.slice(0, 10)));
       }
 
       // クイズオーバーレイ要素
@@ -154,53 +154,18 @@
       const quizSubmit      = document.getElementById('quizSubmit');
       const quizResult      = document.getElementById('quizResult');
 
-      // --- ユーティリティ関数群 (省略せずそのままゲームロジックをペーストしてください) ---
+      // --- 既存のユーティリティ関数群をここにペーストしてください ---
       // getRandomCandy(), createBoard(), findMatches(), findConnectedGroups(),
       // removeMatches(), collapseBoard(), processMatches(), removeInitialMatches(),
       // getTile(), areAdjacent(), drawBoard(), drawHomeScreen(), drawGameScreen(),
-      // drawGameOverScreen(), startQuiz() など
-      //
-      // （**ここでは文字数の都合で省略**。元々お使いのゲームロジックをそのまま
-      //  コピペして、この initGame() 内に配置してください）
+      // drawGameOverScreen(), startQuiz(), gameLoop(), startNewGame()
 
-      // --- 入力処理とゲームループ ---
-      canvas.addEventListener('click', async e => {
-        // 例：ホーム画面 → ゲーム開始
-        // ゲーム中のタイル選択・マッチ判定・moveCount 増加・processMatches()
-        // → moveCount >= MAX_MOVES のときに Game Over へ
-        if (moveCount >= MAX_MOVES) {
-          updateRanking(score);
-          await awardPoints(score);    // ← ここで Azure に送信
-          gameState = 'gameOver';
-        }
-      });
-
-      document.addEventListener('keydown', async e => {
-        // Pキーで再開、Hキーでホームなど
-      });
-
-      function gameLoop() {
-        // gameState に応じて drawHomeScreen(), drawGameScreen(), drawGameOverScreen() を呼ぶ
-        requestAnimationFrame(gameLoop);
-      }
-
-      // ゲーム開始用関数
-      function startNewGame() {
-        gameBackground.src = `${ASSETS_PATH}/bg_game.png`;
-        board = createBoard();
-        removeInitialMatches();
-        score = 0;
-        moveCount = 0;
-        selectedTile = null;
-        lastQuizMove = -1;
-        doubleScore = false;
-        // 最初のクイズ
-        startQuiz(result => {
-          doubleScore = result;
-          lastQuizMove = 0;
-          gameState = 'game';
-        });
-      }
+      // Game Over 判定内でポイント付与
+      // if (moveCount >= MAX_MOVES) {
+      //   updateRanking(score);
+      //   await awardPoints(score);
+      //   gameState = 'gameOver';
+      // }
 
       // 初期画面設定＆ループ開始
       gameState = 'home';
