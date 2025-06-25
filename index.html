@@ -74,7 +74,8 @@
     (async () => {
       await liff.init({ liffId: APP_CONFIG.LIFF_ID });
       if (!liff.isLoggedIn()) {
-        liff.login({ redirectUri: APP_CONFIG.LIFF_URL });
+        // GitHub Pages の公開 URL をそのまま redirectUri に指定
+        liff.login({ redirectUri: "https://nakata-10.github.io/candy-quiz/" });
         return;
       }
       LINE_USER_ID  = liff.getContext().userId;
